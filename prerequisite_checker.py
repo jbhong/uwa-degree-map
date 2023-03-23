@@ -714,5 +714,87 @@ if __name__ == "__main__":
 
 
 
+def url_check(url, code):
+    """check the code data from web"""
+    response = requests.get(url + code)
+    soup = BeautifulSoup(response.text, "html.parser")
+    text = soup.get_text().strip()
+    return " ".join([s.strip() for s in text.splitlines() if s.strip()])
+
+def match_code(text):
+    pattern = r'\b[a-zA-Z]{4}\d{4}\b|\b6 points\b|\b12 points\b|\b24 points\b|\b36 points\b|\b48 points\b'
+    matches = re.findall(pattern, text)
+    return matches  
+
+def is_code(ucode):
+    """check if ucode is actually code"""
+    return (len(ucode) == 8 and 
+            ucode[4:].isnumeric() and
+            ucode[:4].isalpha())
+
+
+CURL = ""
+text = url_check(CURL, "")
+
+if "Master of Professional Engineering" in text:
+    prem = text[text.index("Course structure details"):
+                text.index("Biomedical Engineering specialisation")]
+    after = text[text.index("Software Engineering specialisation"):
+                 text.index("Meet our students")]
+    after = after.replace("Take unit(s) to the value of 36 points", "Option - Take unit(s) to the value of 36 points")
+    text = prem + " " + after
+elif "Software Engineering major units." in text:
+    text = text[text.index("Software Engineering major units."):text.index("Course structure details Your degree options")]
+elif "Accreditation" in text:
+    text = text[text.index("Course structure details"):text.index("Accreditation")]
+elif "Course accreditation" in text:
+    text = text[text.index("Course structure details"):text.index("Course accreditation")]
+
+
+# print("***")
+# print(text)
+# print("***")
+
+text = text.replace("Honours", "")
+
+if "Level" in text:
+    textlist = text.split("Level")[1:]
+    if "Option" in text:
+        textlist = [text.strip().split("Option") for text in textlist]
+    else:
+        textlist = [[text] for text in textlist]
+elif "Conversion" in text: #works for MIT
+    textlist = [t.split("Option") for t in text.split("Core")]
+level = 0
+conv, brid, core, opt = {}, {}, {}, {}
+
+
+# print("***")
+# print(textlist)
+# print("***")
+# # input()
+
+for text in textlist:
+    options = []
+    for i in range(len(text)):
+        if any(["Conversion" in t for t in text]):
+            conv[level] = match_code(text[0])
+            continue
+        elif level == 0:
+            level += 1
+        if "Bridging" in text[i]:
+            brid[level] = match_code(" ".join(text[i].split("Bridging")[1:]))
+            text[i] = " ".join(text[i].split("Bridging")[:1])
+        if i == 0:
+            core[level] = [code for code in match_code(text[i]) if is_code(code)]
+
+        else:
+            option = match_code(text[i])
+            # option = get_relevant_text(PREFIX, text[i])
+            options.append(option)
+    opt[level] = options
+
+    print(f"Level {level} Done!")
+    level += 1
 
 
