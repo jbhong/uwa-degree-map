@@ -4,6 +4,7 @@
     date       : 15 March 2023
 """
 
+import copy
 import requests
 from bs4 import BeautifulSoup
 import pickle
@@ -24,7 +25,7 @@ class Unit:
         if get_text:
             text = self.get_text()
             if text == []:
-                print("There was no text data provided, check your url...")
+                #print("There was no text data provided, check your url...")
                 return
         self.text = text
         self.title = text[text.index("UWA Handbook 2023") + 1]
@@ -127,6 +128,7 @@ class Unit:
             prereq = " or ".join([row.strip() for row in prereq]).split("and ")
             prereq = " and ".join([row.strip() for row in prereq])
             prereq = prereq.replace("Enrolment in", "Enrolment in ")
+            prereq = prereq.replace("Programming and System", "Programming & System")
             prereq = prereq.replace("FoundationsandCITS1401", "Foundations and CITS1401")
             prereq = prereq.replace("Java andM", "Java and M")
             prereq = prereq.replace("Bachel or", "Bachelor")
@@ -250,7 +252,7 @@ class Unit:
             with open(UNIT_PATH + code, 'rb') as f:
                 return pickle.load(f)
         except FileNotFoundError:
-            print(f"UnitClassError: file [{code}] doesn't exist... I'll get it from the handbook and make it...")
+            print(f"UnitClassError: file {code} doesn't exist... I'll get it from the handbook and make it...")
             try:
                 self.code = code
                 text = self.get_text()
@@ -306,19 +308,26 @@ class UnitList:
         return out.strip(", ")
 
 
+    def __getitem__(self, code):
+        return self.units[code]
+
     def get_unit_list_helper(self, codes):
         """get units helper"""
         units = {}
         for code in codes:
+            success = False
             try:
-                unit = Unit().load(code)
+                if type(code) == str:
+                    unit = Unit().load(code)
+                    success = True
             except FileNotFoundError:
                 print(f"the unit, {code}, doesn't exist, so making it...")
                 unit = Unit(code)
             except:
                 print(f"could not make the unit, {code}... skipping...")
                 continue
-            units[code] = unit
+            if success:
+                units[code] = unit
         return units
 
 
@@ -461,8 +470,9 @@ class Course:
         self.core = {}
         self.option = {}
         self.unitlist = UnitList()
+        self.study_plan = {"Y1S1" : [], "Y1S2" : [], "Y2S1" : [], "Y2S2" : [], "Y3S1" : [], "Y3S2" : [], "Y4S1" : [], "Y4S2" : []}
         if url and len(self.text) > 0:
-            self.title = self.text[0].split(":")[0].strip()
+            self.title = self.text.split(":")[0].strip()
             self.conversion, self.bridging, self.core, self.option = self.find_units()
             units = []
             [units.extend(value) for value in self.conversion.values()]
@@ -470,6 +480,8 @@ class Course:
             [units.extend(value) for value in self.core.values()]
             [units.extend(value) for value in self.option.values()]
             self.unitlist = UnitList(ulist=units)
+        # if len(self.core) > 0:
+        #     self.get_study_plan()
                     
     def __str__(self):
         result = "*" * 20 + "\n"
@@ -500,15 +512,16 @@ class Course:
 
     def get_text(self):
         """fetch the text data from the url"""
-        response = requests.get(self.url)
-        if response.status_code == 200:
-            soup = BeautifulSoup(response.text, "html.parser")
-            #return [s.strip() for s in soup.get_text().splitlines() if s.strip()]
-            # below two lines replace the one above
-            text = soup.get_text().strip()
-            return " ".join([s.strip() for s in text.splitlines() if s.strip()])
-        else:
-            print("the url for the course doesn't exist...")
+        if self.url is not None:
+            response = requests.get(self.url)
+            if response.status_code == 200:
+                soup = BeautifulSoup(response.text, "html.parser")
+                #return [s.strip() for s in soup.get_text().splitlines() if s.strip()]
+                # below two lines replace the one above
+                text = soup.get_text().strip()
+                return " ".join([s.strip() for s in text.splitlines() if s.strip()])
+            else:
+                print("the url for the course doesn't exist...")
         return []
     
     def save(self, fname=""):
@@ -531,15 +544,7 @@ class Course:
         for code, unit in self.unitlist.units.items():
             if not type(unit):
                 self.unitlist.units[code] = unit.update()
-            
 
-    # def add_code(self, text, index, codes):
-    #     """check if the specified row starts with unit code"""
-    #     if (len(text[index].split()[0]) == 8 and 
-    #             text[index].split()[0][4:].isnumeric() and
-    #             ("(0)" not in text[index].split())):
-    #         codes.append(text[index].split()[0])
-    #     return codes
     
     def match_code(self, text):
         pattern = r'\b[a-zA-Z]{4}\d{4}\b|\b6 points\b|\b12 points\b|\b24 points\b|\b36 points\b|\b48 points\b'
@@ -551,51 +556,6 @@ class Course:
         return (len(ucode) == 8 and 
                 ucode[4:].isnumeric() and
                 ucode[:4].isalpha())
-
-    # def get_units(self, core, option, conversion, level, text):
-    #     """ get units from the course list
-    #         it doesn't keep track of 0 point units.
-    #         still work needs done for MPE.
-    #     """
-    #     #do the conversion stuff
-    #     index = 0
-    #     codes = []
-    #     while (index < len(text) and 
-    #             (not text[index].startswith("Core")) and 
-    #             (not text[index].startswith("Option")) and 
-    #             (not text[index].startswith("Level"))):
-    #         codes = self.add_code(text, index)
-    #         index += 1
-    #     if len(codes) > 0:
-    #         conversion[0] = codes
-    #     index += 1
-
-    #     #do the core stuff
-    #     codes = []
-    #     while (index < len(text) and 
-    #             (not text[index].startswith("Option")) and 
-    #             (not text[index].startswith("Level"))):
-    #         codes = self.add_code(text, index)
-    #         index += 1
-    #     if len(codes) > 0:
-    #         core[level] = codes
-        
-    #     #do the option stuff
-    #     codes = []
-    #     if index < len(text) and not text[index].startswith("Level"):
-    #         while (index < len(text) and 
-    #             (not text[index].startswith("Level"))):
-    #             codes = self.add_code(text, index)
-    #             if text[index].startswith("Option"):
-    #                 codes.append(f"Level {level} {text[index]}:{text[index + 1]}")
-    #                 index += 1
-    #             index += 1
-    #         option[level] = codes
-    #     else:
-    #         index += 1
- 
-    #     text = text[index:]
-    #     return core, option, conversion, text
     
 
     def find_units(self) -> dict:
@@ -659,6 +619,89 @@ class Course:
         #     core, option, conversion, text = self.get_units(core, option, conversion, level, text)
 
         return conversion, bridging, core, option
+    
+    # write a method get_study_plan that returns a dictionary of the study plan for the course. The dictionary keys are the years and semesters (Y1S1, Y1S2, Y2S1, Y2S2, Y3S1, Y3S2, Y4S1, Y4S2) and the values are lists of the units that can be taken in that year. in each semester, at most 4 units can be taken. The values are unit codes that can be taken in that year. The prerequisites of each unit are checked to ensure that the unit is taken in later years if the prerequisite has not been met.
+    def get_study_plan(self) -> dict:
+        
+        # #duplicate self.core dictionary to avoid changing the original
+        # all_units = copy.deepcopy(self.core)
+
+        all_units = copy.deepcopy(self.study_plan)
+        #separating units based on semesters onto a new dictionary
+        for k, v in self.core.items():
+            for code in v:
+                current_unit = self.unitlist[code]
+                if 1 in current_unit.semester:
+                    all_units[f"Y{k}S1"].append(code)
+                if 2 in current_unit.semester:
+                    all_units[f"Y{k}S2"].append(code)
+
+        #check the number of units in each semester is no more than 4
+        #if more than 4, remove a unit that can be placed into another semester
+        #if the unit cannot be moved to another semester, move one to the next year
+        spare = []
+        for k, v in all_units.items():
+            while len(spare) > 0 and len(v) < 4:
+                v.append(spare.pop())
+            if len(v) > 4:
+                spare.append(v.pop())
+                
+
+        #go through items in all_units and remove duplicates
+        exists = set()
+        for k, v in all_units.items():
+            for code in v:
+                if code in exists:
+                    all_units[k].remove(code)
+                else:
+                    exists.add(code)
+                        
+        #now we will check the prerequisites of each unit
+        covered = set()
+        covered.add("MATH1721")
+        covered.add("MATH1720")
+        for k, v in all_units.items():
+            year = int(k[1])
+            sem = int(k[3])
+            for code in v:
+                unit = self.unitlist[code]
+                if len(unit.prereqlist) > 0:
+                    for prereqs in unit.prereqlist:
+                        satisfied = True if set(prereqs).issubset(covered) else False
+                        if satisfied:
+                            #dont need to check other prerequisites
+                            break
+                    if not satisfied:
+                        #do something about sorting out prereq
+                        print(prereqs)
+                        print(f"{code} NOT COVERED")
+
+                #all passed, so add it to the covered set
+                covered.add(code)
+                
+
+
+        
+        for k, v in all_units.items():
+            print(k, v)
+        #combines the core and option units into one dictionary
+        # for k, v in self.option.items():
+        #     if len(v) > 0:
+        #         for options in v:
+        #             all_units[k].append(options[0])
+
+        #using all_units we will populate the self.study_plan dictionary
+        #the keys are the years and semesters (Y1S1, Y1S2, Y2S1, Y2S2, Y3S1, Y3S2, Y4S1, Y4S2)
+
+
+
+        # print(self.core)
+        # print("*" * 20)
+        # print(self.option)
+        # print("*" * 20)
+        # print(all_units)
+
+
 
 
 
@@ -746,19 +789,18 @@ if __name__ == "__main__":
     # course = Course()
 
     # # you can create the course from giving a URL
-    # course = Course(url="https://www.uwa.edu.au/study/Courses/International-Cybersecurity")
+    #course = Course(url="https://www.uwa.edu.au/study/Courses/International-Cybersecurity")
     # course = Course(url="https://www.uwa.edu.au/study/Courses/Artificial-Intelligence")
     # course = Course(url="https://www.uwa.edu.au/study/Courses/Computing-and-Data-Science")
     # course = Course(url="https://www.uwa.edu.au/study/Courses/Software-Engineering")
     # course = Course(url="https://www.uwa.edu.au/study/courses/master-of-information-technology")
     # MPE import needs work...
-    course = Course(url="https://www.uwa.edu.au/study/courses/master-of-professional-engineering")
+    # course = Course(url="https://www.uwa.edu.au/study/courses/master-of-professional-engineering")
     
-    print(course)
 
     # # you can also load courses from saved course files
-    # course = Course()
-    # course = course.load("Artificial Intelligence")
+    course = Course().load("Artificial Intelligence")
+    #course = Course().load("International Cybersecurity")
     # print(course)
     # # update the course units' contentsx from handbook by updating
     # course.update()
@@ -767,6 +809,8 @@ if __name__ == "__main__":
     # # the title is used as the file name, unless provided
     # course.save()
     # course.save("some_name")
+
+    print(course)
 
 
 
