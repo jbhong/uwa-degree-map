@@ -40,7 +40,12 @@ class Unit:
         
         self.offering = "NA"
         i = [text.index(j) for j in text if j.startswith("Offering")][0]
-        j = text.index("Outcomes")
+        
+        try:
+            j = [text.index(j) for j in text if j.startswith("Details for undergraduate courses")][0]
+        except:
+            j = text.index("Outcomes")
+
         for k in range(i, j):
             self.offering += text[k]
         rows = self.offering.split("Semester")
@@ -48,7 +53,9 @@ class Unit:
         self.offer = []
         self.semester = set()
         for row in rows:
-            if "1" in row:
+            if "Not available" in row:
+                self.offer = "Not available"
+            elif "1" in row:
                 self.semester.add(1)
                 if "Face" in row:
                     if "UWA (Perth)" in row:
@@ -96,8 +103,7 @@ class Unit:
                         self.offer.append(("Semester 2", "UWA (Perth)", "Online"))
                     elif "Albany" in row:
                         self.offer.append(("Semester 2", "Albany", "Online"))
-            elif "Not available" in row:
-                self.offer = "Not available"
+
 
         self.ugdetails = "Check the handbook"
         i = [text.index(j) for j in text if j.startswith("Offering")][0]
@@ -256,6 +262,7 @@ class Unit:
             try:
                 self.code = code
                 text = self.get_text()
+                print("2", code, text)
                 unit = Unit(code, text, False)
                 unit.save()
                 return unit
@@ -470,7 +477,8 @@ class Course:
         self.core = {}
         self.option = {}
         self.unitlist = UnitList()
-        self.study_plan = {"Y1S1" : [], "Y1S2" : [], "Y2S1" : [], "Y2S2" : [], "Y3S1" : [], "Y3S2" : [], "Y4S1" : [], "Y4S2" : []}
+        self.study_plan_s1 = {"Y1S1" : [], "Y1S2" : [], "Y2S1" : [], "Y2S2" : [], "Y3S1" : [], "Y3S2" : [], "Y4S1" : [], "Y4S2" : []}
+        self.study_plan_s2 = {"Y1S2" : [], "Y1S1" : [], "Y2S2" : [], "Y2S1" : [], "Y3S2" : [], "Y3S1" : [], "Y4S2" : [], "Y4S1" : []}
         if url and len(self.text) > 0:
             self.title = self.text.split(":")[0].strip()
             self.conversion, self.bridging, self.core, self.option = self.find_units()
@@ -478,7 +486,10 @@ class Course:
             [units.extend(value) for value in self.conversion.values()]
             [units.extend(value) for value in self.bridging.values()]
             [units.extend(value) for value in self.core.values()]
-            [units.extend(value) for value in self.option.values()]
+            for values in self.option.values():
+                if len(values) > 0:
+                    for value in values:
+                        units.extend(value[1:])
             self.unitlist = UnitList(ulist=units)
         # if len(self.core) > 0:
         #     self.get_study_plan()
@@ -621,12 +632,12 @@ class Course:
         return conversion, bridging, core, option
     
     # write a method get_study_plan that returns a dictionary of the study plan for the course. The dictionary keys are the years and semesters (Y1S1, Y1S2, Y2S1, Y2S2, Y3S1, Y3S2, Y4S1, Y4S2) and the values are lists of the units that can be taken in that year. in each semester, at most 4 units can be taken. The values are unit codes that can be taken in that year. The prerequisites of each unit are checked to ensure that the unit is taken in later years if the prerequisite has not been met.
-    def get_study_plan(self) -> dict:
+    def get_study_plan_s1(self) -> dict:
         
         # #duplicate self.core dictionary to avoid changing the original
         # all_units = copy.deepcopy(self.core)
 
-        all_units = copy.deepcopy(self.study_plan)
+        all_units = copy.deepcopy(self.study_plan_s1)
         #separating units based on semesters onto a new dictionary
         for k, v in self.core.items():
             for code in v:
@@ -635,34 +646,72 @@ class Course:
                     all_units[f"Y{k}S1"].append(code)
                 if 2 in current_unit.semester:
                     all_units[f"Y{k}S2"].append(code)
-
-        #check the number of units in each semester is no more than 4
-        #if more than 4, remove a unit that can be placed into another semester
-        #if the unit cannot be moved to another semester, move one to the next year
-        spare = []
+        
+        #now add option units to all_units
+        for k, v in self.option.items():
+            if len(v) > 0:
+                for prereq_set in v:
+                    if prereq_set[0] == "6 points":
+                        i = 1
+                        while len(self.unitlist[prereq_set[i]].semester) < 1 and i < len(prereq_set):
+                            i += 1
+                        available_sem = list(self.unitlist[prereq_set[i]].semester)[0]
+                        all_units[f"Y{k}S{available_sem}"].append(prereq_set[i])
+                    elif prereq_set[0] == "12 points": #there should be at least 2 units in the list
+                        i = 1
+                        while len(self.unitlist[prereq_set[i]].semester) < 1 and i < len(prereq_set):
+                            i += 1
+                        available_sem = list(self.unitlist[prereq_set[i]].semester)[0]
+                        all_units[f"Y{k}S{available_sem}"].append(prereq_set[i])
+                        i += 1
+                        while len(self.unitlist[prereq_set[i]].semester) < 1 and i < len(prereq_set):
+                            i += 1
+                        available_sem = list(self.unitlist[prereq_set[i]].semester)[0]
+                        all_units[f"Y{k}S{available_sem}"].append(prereq_set[i])
         for k, v in all_units.items():
-            while len(spare) > 0 and len(v) < 4:
-                v.append(spare.pop())
-            if len(v) > 4:
-                spare.append(v.pop())
-                
-
+            print(k, sorted(v))               
+        print("*"*50)
+        
         #go through items in all_units and remove duplicates
         exists = set()
+        remove = []
         for k, v in all_units.items():
             for code in v:
                 if code in exists:
-                    all_units[k].remove(code)
+                    remove.append((k, code))
                 else:
                     exists.add(code)
-                        
+        for val in remove:
+            all_units[val[0]].remove(val[1])
+        
+          
         #now we will check the prerequisites of each unit
         covered = set()
         covered.add("MATH1721")
         covered.add("MATH1720")
         for k, v in all_units.items():
+            #making sure the units fit into sems
             year = int(k[1])
             sem = int(k[3])
+            possible = []
+            if len(v) > 4:
+                for code in v:
+                    unit = self.unitlist[code]
+                    if len(unit.prereqlist) > 1: #means availabled in both semesters
+                        possible.append(code)
+            if len(possible) > 0:
+                move_code = possible[0]
+                all_units[k].remove(move_code)
+                if sem == 1:
+                    all_units[f"Y{year}S2"].append(move_code)
+                else:
+                    all_units[f"Y{year+1}S1"].append(move_code)
+            else:
+                #should scan further year units and avoid prereqs.
+                pass
+
+
+            #prereq checking part
             for code in v:
                 unit = self.unitlist[code]
                 if len(unit.prereqlist) > 0:
@@ -675,6 +724,7 @@ class Course:
                         #do something about sorting out prereq
                         print(prereqs)
                         print(f"{code} NOT COVERED")
+                        pass
 
                 #all passed, so add it to the covered set
                 covered.add(code)
@@ -683,7 +733,7 @@ class Course:
 
         
         for k, v in all_units.items():
-            print(k, v)
+            print(k, sorted(v))
         #combines the core and option units into one dictionary
         # for k, v in self.option.items():
         #     if len(v) > 0:
@@ -789,7 +839,7 @@ if __name__ == "__main__":
     # course = Course()
 
     # # you can create the course from giving a URL
-    #course = Course(url="https://www.uwa.edu.au/study/Courses/International-Cybersecurity")
+    # course = Course(url="https://www.uwa.edu.au/study/Courses/International-Cybersecurity")
     # course = Course(url="https://www.uwa.edu.au/study/Courses/Artificial-Intelligence")
     # course = Course(url="https://www.uwa.edu.au/study/Courses/Computing-and-Data-Science")
     # course = Course(url="https://www.uwa.edu.au/study/Courses/Software-Engineering")
@@ -799,8 +849,9 @@ if __name__ == "__main__":
     
 
     # # you can also load courses from saved course files
-    course = Course().load("Artificial Intelligence")
-    #course = Course().load("International Cybersecurity")
+    # course = Course().load("Artificial Intelligence")
+    course = Course().load("International Cybersecurity")
+    # course = Course().load("Computing and Data Science")
     # print(course)
     # # update the course units' contentsx from handbook by updating
     # course.update()
@@ -810,8 +861,12 @@ if __name__ == "__main__":
     # course.save()
     # course.save("some_name")
 
-    print(course)
+    # print(course)
+    print(course.get_study_plan_s1())
 
+
+    # course.unitlist["CITS2200"].prereqlist[0][0] = "CITS1401"
+    # course.save()   
 
 
 
