@@ -1,3 +1,4 @@
-# uwa-degree-map
+# uwa-study-planner
+
 
 hello world.
