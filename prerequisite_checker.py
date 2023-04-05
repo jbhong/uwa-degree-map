@@ -13,8 +13,11 @@ import re
 from itertools import product
 import sys
 
+# UNIT_PATH = "./uwa-study-planner/units/"
+# COURSE_PATH = "./uwa-study-planner/courses/"
 UNIT_PATH = "./units/"
 COURSE_PATH = "./courses/"
+HONOURS = ["CITS4010", "CITS4011"]
 
 class Unit:
     URL = "https://handbooks.uwa.edu.au/unitdetails?code="
@@ -244,9 +247,10 @@ class Unit:
         matches = re.findall(pattern, text)
         return matches  
 
-    def save(self, fname=""):
+    def save(self, fname="", update=True):
         """saves the unit file"""
-        self.update_values()
+        if update:
+            self.update_values()
         fname = self.code if fname == "" else fname
         with open(UNIT_PATH + fname, 'wb') as f:
             pickle.dump(self, f)
@@ -262,7 +266,6 @@ class Unit:
             try:
                 self.code = code
                 text = self.get_text()
-                print("2", code, text)
                 unit = Unit(code, text, False)
                 unit.save()
                 return unit
@@ -591,7 +594,7 @@ class Course:
         
 
         text = text.replace("Honours", "")
-
+        text = text[text.index("Level 1"):]
         if "Level" in text:
             textlist = text.split("Level")[1:]
             if "Option" in text:
@@ -631,6 +634,38 @@ class Course:
 
         return conversion, bridging, core, option
     
+
+
+    def add_unitlist(self, unit, cat="core", level=-1, group=1):
+        """add the unit to the unitlist"""
+        level = int(unit.code[4]) if level == -1 else level
+        if cat == "core":
+            self.core[level].append(unit.code)
+            self.unitlist.ulist.append(unit.code)
+        # need to check adding options
+        elif cat == "option":
+            if len(self.option[level]) > 0:
+                self.option[level][group].append(unit.code)
+            else:
+                self.option[level].append([unit.code])
+            self.unitlist.ulist.append(unit.code)
+        self.unitlist = UnitList(ulist=self.unitlist.ulist)
+
+    def remove_unitlist(self, code, cat="core"):
+        """remove the unit from the unitlist"""
+        if cat == "core":
+            for k, v in self.core.items():
+                if code in v:
+                    self.core[k].remove(code)
+                    self.unitlist.ulist.remove(code)
+        elif cat == "option":
+            for k, v in self.option.items():
+                for i in range(len(v)):
+                    if code in v[i]:
+                        self.option[k][i].remove(code)
+                        self.unitlist.ulist.remove(code)
+        self.unitlist = UnitList(ulist=self.unitlist.ulist)
+
     # write a method get_study_plan that returns a dictionary of the study plan for the course. The dictionary keys are the years and semesters (Y1S1, Y1S2, Y2S1, Y2S2, Y3S1, Y3S2, Y4S1, Y4S2) and the values are lists of the units that can be taken in that year. in each semester, at most 4 units can be taken. The values are unit codes that can be taken in that year. The prerequisites of each unit are checked to ensure that the unit is taken in later years if the prerequisite has not been met.
     def get_study_plan_s1(self) -> dict:
         
@@ -646,24 +681,26 @@ class Course:
                     all_units[f"Y{k}S1"].append(code)
                 if 2 in current_unit.semester:
                     all_units[f"Y{k}S2"].append(code)
-        
         #now add option units to all_units
         for k, v in self.option.items():
             if len(v) > 0:
                 for prereq_set in v:
                     if prereq_set[0] == "6 points":
                         i = 1
+                        #skip units that are not offered
                         while len(self.unitlist[prereq_set[i]].semester) < 1 and i < len(prereq_set):
                             i += 1
                         available_sem = list(self.unitlist[prereq_set[i]].semester)[0]
                         all_units[f"Y{k}S{available_sem}"].append(prereq_set[i])
                     elif prereq_set[0] == "12 points": #there should be at least 2 units in the list
                         i = 1
+                        #skip units that are not offered
                         while len(self.unitlist[prereq_set[i]].semester) < 1 and i < len(prereq_set):
                             i += 1
                         available_sem = list(self.unitlist[prereq_set[i]].semester)[0]
                         all_units[f"Y{k}S{available_sem}"].append(prereq_set[i])
                         i += 1
+                        #skip units that are not offered for 2nd unit
                         while len(self.unitlist[prereq_set[i]].semester) < 1 and i < len(prereq_set):
                             i += 1
                         available_sem = list(self.unitlist[prereq_set[i]].semester)[0]
@@ -684,11 +721,34 @@ class Course:
         for val in remove:
             all_units[val[0]].remove(val[1])
         
+
+        #deal with honours project units that are 12 pts
+        saved = ""
+        first = False
+        second = False
+        for k, v in all_units.items():
+            if len(saved) > 0:
+                second = True
+            for code in v:
+                if code == "CITS4010" and not first:
+                    all_units[k].append(code)
+                    first = True
+                elif (code == "CITS4011") and first:
+                    saved = code
+                    all_units[k].remove(code)
+            if second:
+                all_units[k].append(saved)
+                all_units[k].append(saved)
+                saved = ""
+                second = False
+            
+    
           
         #now we will check the prerequisites of each unit
         covered = set()
         covered.add("MATH1721")
         covered.add("MATH1720")
+        covered.add("MATH1012")
         for k, v in all_units.items():
             #making sure the units fit into sems
             year = int(k[1])
@@ -696,17 +756,45 @@ class Course:
             possible = []
             if len(v) > 4:
                 for code in v:
+                    #this checks if any units offered in both semesters
                     unit = self.unitlist[code]
-                    if len(unit.prereqlist) > 1: #means availabled in both semesters
+                    if len(unit.semester) > 1 and unit.code not in HONOURS: #means availabled in both semesters
                         possible.append(code)
             if len(possible) > 0:
-                move_code = possible[0]
+                move_code = possible[0] #just move the first option
                 all_units[k].remove(move_code)
                 if sem == 1:
                     all_units[f"Y{year}S2"].append(move_code)
                 else:
                     all_units[f"Y{year+1}S1"].append(move_code)
-            else:
+            elif len(v) > 4:
+                #let's check if we can move it up
+                if year > 2 and sem == 1:
+                    if len(all_units[f"Y{year-1}S1"]) < 4:
+                        i = 0
+                        while v[i] in HONOURS:
+                            i += 1
+                        move_code = v[i]
+                        all_units[k].remove(move_code)
+                        all_units[f"Y{year-1}S1"].append(move_code)
+                    else:
+                        #can't do anything about it with this unit.
+                        pass
+                elif year > 2 and sem == 2:
+                    if len(all_units[f"Y{year-1}S2"]) < 4:
+                        i = 0
+                        print(v[i])
+                        while v[i] in HONOURS:
+                            i += 1
+                        move_code = v[i]
+                        all_units[k].remove(move_code)
+                        all_units[f"Y{year-1}S2"].append(move_code)
+                    else:
+                        #can't do anything about it with this unit.
+                        pass
+                    
+
+
                 #should scan further year units and avoid prereqs.
                 pass
 
@@ -727,7 +815,7 @@ class Course:
                         pass
 
                 #all passed, so add it to the covered set
-                covered.add(code)
+                covered.add(code[:8])
                 
 
 
@@ -844,14 +932,18 @@ if __name__ == "__main__":
     # course = Course(url="https://www.uwa.edu.au/study/Courses/Computing-and-Data-Science")
     # course = Course(url="https://www.uwa.edu.au/study/Courses/Software-Engineering")
     # course = Course(url="https://www.uwa.edu.au/study/courses/master-of-information-technology")
+    # course = Course(url="https://www.uwa.edu.au/study/courses/data-science")
     # MPE import needs work...
     # course = Course(url="https://www.uwa.edu.au/study/courses/master-of-professional-engineering")
     
 
     # # you can also load courses from saved course files
     # course = Course().load("Artificial Intelligence")
-    course = Course().load("International Cybersecurity")
-    # course = Course().load("Computing and Data Science")
+    # course = Course().load("Artificial Intelligence 2024")
+    # course = Course().load("International Cybersecurity")
+    # course = Course().load("International Cybersecurity 2024")
+    course = Course().load("Computing and Data Science")
+    # course = Course().load("Data Science 2024")
     # print(course)
     # # update the course units' contentsx from handbook by updating
     # course.update()
@@ -864,14 +956,7 @@ if __name__ == "__main__":
     # print(course)
     print(course.get_study_plan_s1())
 
-
-    # course.unitlist["CITS2200"].prereqlist[0][0] = "CITS1401"
-    # course.save()   
-
-
-
-
-
+ 
 
     pass
 
